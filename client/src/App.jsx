@@ -54,6 +54,13 @@ function fileToBase64(file) {
   })
 }
 
+function formatCompletionDate(value) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime())
+    ? 'Date unavailable'
+    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
 function App() {
   const [challenge, setChallenge] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -69,6 +76,13 @@ function App() {
   const [clarificationError, setClarificationError] = useState('')
   const [feedbackLoading, setFeedbackLoading] = useState(false)
   const [feedbackError, setFeedbackError] = useState('')
+  const [completionLoading, setCompletionLoading] = useState(false)
+  const [completionError, setCompletionError] = useState('')
+  const [savedCompletion, setSavedCompletion] = useState(null)
+  const [journalEntries, setJournalEntries] = useState([])
+  const [journalLoading, setJournalLoading] = useState(false)
+  const [journalError, setJournalError] = useState('')
+  const [journalReturnScreen, setJournalReturnScreen] = useState('home')
   const cameraInput = useRef(null)
   const photoInput = useRef(null)
   const notePhotoPreviewUrl = useRef('')
@@ -76,6 +90,8 @@ function App() {
   const requestInProgress = useRef(false)
   const feedbackInProgress = useRef(false)
   const clarificationInProgress = useRef(false)
+  const completionInProgress = useRef(false)
+  const journalInProgress = useRef(false)
   const hasChangedScreen = useRef(false)
 
   useEffect(() => {
@@ -134,13 +150,55 @@ function App() {
         throw new Error('The challenge response was incomplete.')
       }
 
-      setChallenge(data)
+      setChallenge({ ...data, completionId: crypto.randomUUID() })
     } catch {
       setError("We couldn't find a challenge just now. Please try again in a moment.")
     } finally {
       requestInProgress.current = false
       setLoading(false)
     }
+  }
+
+  async function loadJournal() {
+    if (journalInProgress.current) return
+    journalInProgress.current = true
+    setJournalLoading(true)
+    setJournalError('')
+    try {
+      const response = await fetch('http://localhost:3000/api/completions')
+      let data
+      try {
+        data = await response.json()
+      } catch {
+        throw new Error('The journal returned an unexpected response. Please try again.')
+      }
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Your journal could not be loaded. Please try again.')
+      }
+      if (!Array.isArray(data?.completions)) {
+        throw new Error('The journal returned an unexpected response. Please try again.')
+      }
+      setJournalEntries(data.completions)
+    } catch (loadError) {
+      setJournalError(loadError instanceof TypeError
+        ? 'We could not reach your journal. Check that the backend is running, then retry.'
+        : loadError instanceof Error && loadError.message
+          ? loadError.message
+          : 'Your journal could not be loaded. Please try again.')
+    } finally {
+      journalInProgress.current = false
+      setJournalLoading(false)
+    }
+  }
+
+  async function openJournal() {
+    if (screen !== 'journal') setJournalReturnScreen(screen)
+    setScreen('journal')
+    await loadJournal()
+  }
+
+  function closeJournal() {
+    setScreen(journalReturnScreen)
   }
 
   function startNewChallenge() {
@@ -153,6 +211,8 @@ function App() {
     setClarifications([])
     setClarificationError('')
     setFeedbackError('')
+    setCompletionError('')
+    setSavedCompletion(null)
     getChallenge()
   }
 
@@ -178,6 +238,7 @@ function App() {
     setNotePhoto(file)
     setNotePhotoPreview(previewUrl)
     setNotePhotoError('')
+    setCompletionError('')
   }
 
   function removeNotePhoto() {
@@ -229,8 +290,77 @@ function App() {
     return data
   }
 
+  async function saveQuestCompletion(feedback = aiFeedback, clarificationHistory = clarifications) {
+    if (completionInProgress.current) return false
+    if (!notePhoto) {
+      setCompletionError('Add a photo of your handwritten notes before completing this quest.')
+      return false
+    }
+    if (!challenge?.completionId) {
+      setCompletionError('This quest could not be saved. Please start a new challenge and try again.')
+      return false
+    }
+
+    completionInProgress.current = true
+    setCompletionLoading(true)
+    setCompletionError('')
+
+    try {
+      const requestBody = new FormData()
+      requestBody.set('completionId', challenge.completionId)
+      requestBody.set('questPrompt', challenge.activity)
+      requestBody.set('questTitle', challenge.title)
+      requestBody.set('durationMinutes', String(challenge.durationMinutes))
+      requestBody.set('typedSummary', reflection.trim())
+      requestBody.set('aiFeedback', feedback ? JSON.stringify(feedback) : '')
+      requestBody.set('clarificationHistory', JSON.stringify(clarificationHistory))
+      requestBody.set('photo', notePhoto, notePhoto.name || 'handwritten-notes')
+
+      const response = await fetch('http://localhost:3000/api/completions', {
+        method: 'POST',
+        body: requestBody,
+      })
+      let data
+      try {
+        data = await response.json()
+      } catch {
+        throw new Error('The save service returned an unexpected response. Your quest and notes are still here; please retry.')
+      }
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Your quest could not be saved. Your notes are still here; please retry.')
+      }
+      if (
+        data?.completionId !== challenge.completionId ||
+        !Number.isFinite(data?.totalXp) ||
+        data?.xpAwarded !== 5 ||
+        typeof data?.alreadyCompleted !== 'boolean'
+      ) {
+        throw new Error('The save service returned incomplete quest details. Your notes are still here; please retry.')
+      }
+
+      setSavedCompletion(data)
+      setCompletionError('')
+      setScreen('complete')
+      return true
+    } catch (error) {
+      setCompletionError(error instanceof TypeError
+        ? 'We could not reach the save service. Your quest, photo, and notes are still here; please retry.'
+        : error instanceof Error && error.message
+          ? error.message
+          : 'Your quest could not be saved. Your notes are still here; please retry.')
+      return false
+    } finally {
+      completionInProgress.current = false
+      setCompletionLoading(false)
+    }
+  }
+
   async function requestReflectionFeedback() {
     if (feedbackInProgress.current) return
+    if (aiFeedback) {
+      await saveQuestCompletion(aiFeedback, clarifications)
+      return
+    }
     if (!notePhoto && !reflection.trim()) {
       setFeedbackError('Add a photo of your notes or type a short summary to get a response.')
       return
@@ -243,7 +373,7 @@ function App() {
     try {
       const data = await sendReflectionRequest()
       setAiFeedback(data)
-      setScreen('complete')
+      await saveQuestCompletion(data, clarifications)
     } catch (error) {
       setFeedbackError(error instanceof TypeError
         ? 'We could not reach the feedback service. Your photo and summary are still here; please try again.'
@@ -273,9 +403,11 @@ function App() {
     try {
       const allClarifications = [...clarifications, currentClarification].join('\n')
       const data = await sendReflectionRequest(allClarifications)
+      const nextClarifications = [...clarifications, currentClarification]
       setAiFeedback(data)
-      setClarifications((previous) => [...previous, currentClarification])
-      setClarification('')
+      setClarifications(nextClarifications)
+      const saved = await saveQuestCompletion(data, nextClarifications)
+      if (saved) setClarification('')
     } catch (error) {
       setClarificationError(error instanceof TypeError
         ? 'We could not reach the feedback service. Your photo and notes are still here; please try again.'
@@ -297,6 +429,9 @@ function App() {
           <span>Touch Grass<span className="brand-dot">.</span></span>
         </a>
         <p className="topbar-note"><span aria-hidden="true">✳</span> A small invitation outside</p>
+        <button className="journal-nav-button" type="button" onClick={screen === 'journal' ? closeJournal : openJournal}>
+          {screen === 'journal' ? 'Back to your moment' : 'My journal'}
+        </button>
       </header>
 
       {screen === 'home' && (
@@ -341,6 +476,97 @@ function App() {
         <LeafMark />
       </section>
         </>
+      )}
+
+      {screen === 'journal' && (
+        <section className="journey-screen journal-screen" id="journey" aria-labelledby="journey-title" aria-busy={journalLoading}>
+          <p className="eyebrow">YOUR OUTDOOR MOMENTS</p>
+          <h1 className="journey-title" id="journey-title" tabIndex={-1}>Your journal.</h1>
+          <p className="journey-intro">A quiet place to revisit the moments you saved after stepping outside.</p>
+          <div className="journal-toolbar">
+            <p>{journalLoading ? 'Gathering your saved moments...' : `${journalEntries.length} ${journalEntries.length === 1 ? 'moment' : 'moments'} saved`}</p>
+            <button className="journal-refresh-button" type="button" onClick={loadJournal} disabled={journalLoading}>
+              {journalLoading ? 'Loading...' : 'Refresh journal'}
+            </button>
+          </div>
+          {journalLoading && <p className="journal-status" role="status">Loading your journal...</p>}
+          {journalError && (
+            <div className="journal-message" role="alert">
+              <p>{journalError}</p>
+              <button className="journal-refresh-button" type="button" onClick={loadJournal} disabled={journalLoading}>Try again</button>
+            </div>
+          )}
+          {!journalLoading && !journalError && journalEntries.length === 0 && (
+            <div className="journal-message journal-empty">
+              <h2>No saved moments yet.</h2>
+              <p>When you finish a quest with a photo of your handwritten notes, it will find a place here.</p>
+            </div>
+          )}
+          {!journalError && journalEntries.length > 0 && (
+            <div className="journal-list">
+              {journalEntries.map((entry, index) => {
+                const photoUrl = typeof entry.photoPath === 'string' && entry.photoPath.startsWith('uploads/')
+                  ? `http://localhost:3000/${entry.photoPath}`
+                  : ''
+                const dateTime = new Date(entry.completedAt)
+                const entryId = `journal-entry-${index}`
+                return (
+                  <article className="journal-entry" key={entry.completionId || entryId} aria-labelledby={entryId}>
+                    <header className="journal-entry-header">
+                      <div>
+                        <p className="card-label">YOUR OUTDOOR MOMENT</p>
+                        <h2 id={entryId}>{entry.questTitle || 'A moment outside'}</h2>
+                      </div>
+                      <div className="journal-entry-meta">
+                        <time dateTime={Number.isNaN(dateTime.getTime()) ? undefined : dateTime.toISOString()}>{formatCompletionDate(entry.completedAt)}</time>
+                        <span>{entry.xpAwarded === 5 ? '5 XP' : '0 XP'}</span>
+                      </div>
+                    </header>
+                    <p className="journal-prompt">{entry.questPrompt}</p>
+                    {photoUrl && (
+                      <figure className="journal-photo">
+                        <img src={photoUrl} alt={`Handwritten notes for ${entry.questTitle || 'this outdoor moment'}`} loading="lazy" />
+                        <figcaption>Your handwritten notes</figcaption>
+                      </figure>
+                    )}
+                    {entry.typedSummary && (
+                      <section className="journal-detail">
+                        <h3>Your summary</h3>
+                        <p className="journal-preserve-lines">{entry.typedSummary}</p>
+                      </section>
+                    )}
+                    {entry.aiFeedback?.feedback && (
+                      <section className="journal-detail journal-ai-feedback">
+                        <h3>A little reflection</h3>
+                        <p>{entry.aiFeedback.feedback}</p>
+                        {entry.aiFeedback.interpretation && (
+                          <div className="journal-interpretation">
+                            <h4>Interpretation</h4>
+                            <p className="journal-preserve-lines">{entry.aiFeedback.interpretation}</p>
+                          </div>
+                        )}
+                        {entry.aiFeedback.handwriting?.transcription && (
+                          <div className="journal-interpretation">
+                            <h4>What could be read</h4>
+                            <p className="journal-preserve-lines">{entry.aiFeedback.handwriting.transcription}</p>
+                          </div>
+                        )}
+                      </section>
+                    )}
+                    {Array.isArray(entry.clarificationHistory) && entry.clarificationHistory.length > 0 && (
+                      <section className="journal-detail">
+                        <h3>Your handwriting clarifications</h3>
+                        {entry.clarificationHistory.map((item, clarificationIndex) => (
+                          <p className="journal-preserve-lines" key={`${entry.completionId}-${clarificationIndex}`}>{item}</p>
+                        ))}
+                      </section>
+                    )}
+                  </article>
+                )
+              })}
+            </div>
+          )}
+        </section>
       )}
 
       {screen === 'prepare' && challenge && (
@@ -388,7 +614,7 @@ function App() {
           <p className="journey-intro">Take a moment to review what you wrote by hand. If you like, share a short summary of those notes and your experience here.</p>
           <section className="note-photo-section" aria-labelledby="note-photo-title">
             <h2 id="note-photo-title">Add a photo of your paper notes (optional)</h2>
-            <p>Choose a JPEG, PNG, or WebP image up to 8 MB. If you request feedback, it is sent to your configured Ollama server (local by default) and is not stored by Touch Grass.</p>
+            <p>Choose a JPEG, PNG, or WebP image up to 8 MB. A photo is required to save your completed quest. If you request feedback, the photo is also sent to your configured Ollama server (local by default).</p>
             <div className="note-photo-actions">
               <button className="photo-action-button" type="button" onClick={() => cameraInput.current?.click()} disabled={feedbackLoading}>
                 Take a photo
@@ -441,16 +667,17 @@ function App() {
             rows={6}
           />
           {feedbackError && <p className="feedback-error" role="alert">{feedbackError}</p>}
+          {completionError && <p className="feedback-error" role="alert">{completionError}</p>}
           <div className="feedback-actions">
-            <button className="challenge-button journey-button" type="button" onClick={requestReflectionFeedback} disabled={feedbackLoading}>
-              <span>{feedbackLoading ? 'Reading your notes...' : 'Get a gentle response'}</span>
-              <span className="button-arrow" aria-hidden="true">{feedbackLoading ? <span className="loading-spinner" /> : '\u2192'}</span>
+            <button className="challenge-button journey-button" type="button" onClick={requestReflectionFeedback} disabled={feedbackLoading || completionLoading}>
+              <span>{feedbackLoading ? 'Reading your notes...' : completionLoading ? 'Saving your quest...' : aiFeedback ? 'Retry saving your quest' : 'Get a gentle response'}</span>
+              <span className="button-arrow" aria-hidden="true">{feedbackLoading || completionLoading ? <span className="loading-spinner" /> : '\u2192'}</span>
             </button>
-            <button className="finish-without-feedback" type="button" onClick={() => setScreen('complete')} disabled={feedbackLoading}>
-              Finish without AI feedback
+            <button className="finish-without-feedback" type="button" onClick={() => saveQuestCompletion()} disabled={feedbackLoading || completionLoading}>
+              {completionLoading ? 'Saving your quest...' : 'Finish without AI feedback'}
             </button>
           </div>
-          {feedbackLoading && <p className="feedback-loading-note" role="status">Your photo and summary are being sent to your configured Ollama model for a brief response.</p>}
+          {(feedbackLoading || completionLoading) && <p className="feedback-loading-note" role="status">{feedbackLoading ? 'Your photo and summary are being sent to your configured Ollama model for a brief response.' : 'Saving your completed quest and handwritten photo.'}</p>}
         </section>
       )}
 
@@ -466,6 +693,21 @@ function App() {
               ? <div className="completion-reflection"><p className="card-label">YOUR TYPED SUMMARY</p><p>{reflection.trim()}</p></div>
               : <p className="completion-reflection">Your handwritten notes are yours to keep. No summary needed here; thanks for taking a moment outside.</p>}
           </article>
+          {savedCompletion && (
+            <p className="completion-xp" role="status">
+              {savedCompletion.alreadyCompleted
+                ? `Quest saved. ${savedCompletion.xpAwarded} XP is already counted; your total is ${savedCompletion.totalXp} XP.`
+                : `${savedCompletion.xpAwarded} XP awarded. Your total is ${savedCompletion.totalXp} XP.`}
+            </p>
+          )}
+          {completionError && (
+            <div>
+              <p className="feedback-error" role="alert">{completionError}</p>
+              <button className="finish-without-feedback" type="button" onClick={() => saveQuestCompletion(aiFeedback, clarifications)} disabled={completionLoading || feedbackLoading}>
+                {completionLoading ? 'Saving your quest...' : 'Retry saving completion'}
+              </button>
+            </div>
+          )}
           {notePhotoPreview && (
             <figure className="completion-photo">
               <img src={notePhotoPreview} alt="Your selected photo of handwritten paper notes" />
