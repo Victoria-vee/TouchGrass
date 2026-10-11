@@ -13,7 +13,7 @@ const questCompletionSchema = new mongoose.Schema({
     feedback: { type: String, default: null },
     interpretation: { type: String, default: null },
     handwriting: {
-      status: { type: String, enum: ['readable', 'partially_readable', 'unclear', 'no_image'], default: null },
+      status: { type: String, enum: ['readable', 'partially_readable', 'unclear', 'no_image', 'not_applicable'], default: null },
       transcription: { type: String, default: null },
     },
   },

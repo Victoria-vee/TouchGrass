@@ -1,5 +1,6 @@
 {
-  "name": "client",
+  "name": "outnabout-client",
+  "description": "OutNAbout web application frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,9 +8,13 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.3.1",
+    "@fortawesome/free-solid-svg-icons": "^7.3.1",
+    "@fortawesome/react-fontawesome": "^3.5.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

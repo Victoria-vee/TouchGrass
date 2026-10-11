@@ -1,12 +1,13 @@
 import express from 'express'
 import { randomUUID } from 'node:crypto'
 import { mkdir, unlink, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { basename, resolve, sep } from 'node:path'
 import QuestCompletion from '../models/QuestCompletion.js'
 import { allowedImageTypes, completionUpload, MAX_TYPED_REFLECTION_LENGTH, uploadDirectory } from '../config.js'
 import { hashImageBuffer, imageSignatureMatches } from '../utils/imageValidation.js'
 
 const router = express.Router()
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 router.get('/', async (_request, response) => {
   const completions = await QuestCompletion.find({ userId: 'local' })
@@ -18,18 +19,17 @@ router.get('/', async (_request, response) => {
 
 router.post('/', completionUpload.single('photo'), async (request, response) => {
   const { completionId } = request.body ?? {}
-  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
   if (typeof completionId !== 'string' || !uuidPattern.test(completionId)) {
     return response.status(400).json({ error: 'This quest could not be identified for saving. Please start a new challenge.' })
   }
 
   if (!request.file) {
-    return response.status(400).json({ error: 'Add a photo of your handwritten notes before completing this quest.' })
+    return response.status(400).json({ error: 'Add a photo of your notes or drawing before completing this quest.' })
   }
 
   const mimeType = request.file.mimetype.toLowerCase()
   if (!allowedImageTypes.has(mimeType) || !imageSignatureMatches(request.file.buffer, mimeType)) {
-    return response.status(415).json({ error: 'Choose a valid JPEG, PNG, or WebP photo of your notes.' })
+    return response.status(415).json({ error: 'Choose a valid JPEG, PNG, or WebP image of your notes or drawing.' })
   }
 
   const questPrompt = typeof request.body.questPrompt === 'string' ? request.body.questPrompt.trim() : ''
@@ -59,7 +59,7 @@ router.post('/', completionUpload.single('photo'), async (request, response) => 
       throw new Error('Invalid clarification history')
     }
     if (parsedFeedback !== null) {
-      const statuses = ['readable', 'partially_readable', 'unclear', 'no_image']
+      const statuses = ['readable', 'partially_readable', 'unclear', 'no_image', 'not_applicable']
       if (
         !parsedFeedback ||
         typeof parsedFeedback.feedback !== 'string' ||
@@ -84,7 +84,7 @@ router.post('/', completionUpload.single('photo'), async (request, response) => 
 
   const reflectionFields = { typedSummary, aiFeedback, clarificationHistory }
   const photoHash = hashImageBuffer(request.file.buffer)
-  const duplicatePhotoMessage = 'This handwritten photo has already been used for another completed quest. Choose a different photo to earn the 5 XP reward.'
+  const duplicatePhotoMessage = 'This photo has already been used for another completed quest. Choose a different photo to earn the 5 XP reward.'
   let completion = await QuestCompletion.findOne({ completionId })
   let alreadyCompleted = Boolean(completion)
 
@@ -178,6 +178,31 @@ router.post('/', completionUpload.single('photo'), async (request, response) => 
     totalXp: xpSummary[0]?.totalXp ?? 0,
     alreadyCompleted,
   })
+})
+
+router.delete('/:completionId', async (request, response) => {
+  const { completionId } = request.params
+  if (!uuidPattern.test(completionId)) {
+    return response.status(400).json({ error: 'This journal entry could not be identified for deletion.' })
+  }
+
+  const completion = await QuestCompletion.findOneAndDelete({ completionId, userId: 'local' }).lean()
+  if (!completion) return response.status(404).json({ error: 'This journal entry was not found. Refresh your journal and try again.' })
+
+  const photoPath = completion.photoPath
+  const filename = typeof photoPath === 'string' && photoPath.startsWith('uploads/')
+    ? photoPath.slice('uploads/'.length)
+    : ''
+  if (filename && basename(filename) === filename && /^[0-9a-f-]{36}-[0-9a-f-]{36}\.(?:jpg|png|webp)$/i.test(filename)) {
+    const absolutePhotoPath = resolve(uploadDirectory, filename)
+    const uploadRoot = resolve(uploadDirectory) + sep
+    if (absolutePhotoPath.startsWith(uploadRoot)) {
+      const referenced = await QuestCompletion.exists({ photoPath })
+      if (!referenced) await unlink(absolutePhotoPath).catch(() => {})
+    }
+  }
+
+  return response.json({ completionId })
 })
 
 export default router

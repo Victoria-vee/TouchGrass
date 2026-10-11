@@ -1,7 +1,9 @@
 :root {
-  font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif;
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-body: 'Nunito', 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
   color: #294438;
-  background: #f6f5ed;
+  /* background: #f6f5ed; */
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -10,6 +12,8 @@
 }
 
 * { box-sizing: border-box; }
+
+h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); }
 
 html { min-width: 320px; min-height: 100%; }
 

@@ -1,6 +1,6 @@
-# Touch Grass
+# OutNAbout
 
-Touch Grass is a small web app for taking a break from screens. It uses AI to suggest a gentle outdoor quest, then gives you a place to reflect on what you noticed in handwritten notes.
+outNAbout is a small web app for taking a break from screens. It uses AI to suggest a gentle outdoor quest, then gives you a place to reflect on what you noticed in handwritten notes.
 
 ## Features
 
@@ -90,7 +90,7 @@ The backend loads `server/.env`. Values below are the defaults in the code; `MON
 | `PORT` | `3000` | Backend port |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama API URL |
 | `OLLAMA_MODEL` | `gemma3:4b` | Model used for quests and reflections |
-| `OLLAMA_TIMEOUT_MS` | `60000` | Challenge generation timeout in milliseconds |
+| `OLLAMA_TIMEOUT_MS` | `120000` | Challenge generation timeout in milliseconds |
 | `OLLAMA_REFLECTION_TIMEOUT_MS` | `180000` | Reflection inference timeout in milliseconds |
 
 Use a placeholder URI in configuration examples, never a real credential:
@@ -109,7 +109,7 @@ Quest and reflection records are stored in MongoDB Atlas. Uploaded journal photo
 
 ## Project philosophy
 
-Touch Grass is meant to make stepping away from a screen feel welcoming and low-pressure. Quests are gentle invitations, not tasks to optimize or score. Paper and pen give the outdoor moment room to stay offline; the journal is there when you return.
+OutNAbout is meant to make stepping away from a screen feel welcoming and low-pressure. Quests are gentle invitations, not tasks to optimize or score. Paper and pen give the outdoor moment room to stay offline; the journal is there when you return.
 
 ## Contributing
 

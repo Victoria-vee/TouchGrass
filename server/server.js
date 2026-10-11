@@ -19,7 +19,7 @@ async function startServer() {
     if (skipped) console.warn(`Could not hash ${skipped} existing journal photo(s); those records remain unchanged.`)
     console.log('Connected to MongoDB Atlas.')
     app.listen(port, '127.0.0.1', () => {
-      console.log('Touch Grass API listening on http://localhost:' + port)
+      console.log('OutNAbout API listening on http://localhost:' + port)
     })
   } catch {
     console.error('Could not connect to MongoDB. Check MONGODB_URI and Atlas network access.')

@@ -1,3 +1,5 @@
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
+import { faAsterisk, faArrowLeft, faArrowRight, faBookOpen, faCircleCheck, faPen, faStar, faTrashCan } from '@fortawesome/free-solid-svg-icons'
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 
@@ -22,7 +24,7 @@ function LeafMark() {
 
 function MeadowIllustration() {
   return (
-    <div className="meadow" role="img" aria-label="Rolling sage-green hills beneath a warm afternoon sun">
+    <div className="meadow" aria-hidden="true">
       <div className="meadow-sun" />
       <div className="meadow-cloud meadow-cloud-one" />
       <div className="meadow-cloud meadow-cloud-two" />
@@ -32,7 +34,7 @@ function MeadowIllustration() {
       <span className="meadow-flower flower-one" aria-hidden="true">✿</span>
       <span className="meadow-flower flower-two" aria-hidden="true">✿</span>
       <span className="meadow-flower flower-three" aria-hidden="true">✿</span>
-      <span className="meadow-caption">there's room to breathe</span>
+      {/* <span className="meadow-caption">there's room to breathe</span> */}
     </div>
   )
 }
@@ -82,6 +84,8 @@ function App() {
   const [journalEntries, setJournalEntries] = useState([])
   const [journalLoading, setJournalLoading] = useState(false)
   const [journalError, setJournalError] = useState('')
+  const [deletingCompletionId, setDeletingCompletionId] = useState('')
+  const [deleteError, setDeleteError] = useState('')
   const [journalReturnScreen, setJournalReturnScreen] = useState('home')
   const cameraInput = useRef(null)
   const photoInput = useRef(null)
@@ -92,6 +96,7 @@ function App() {
   const clarificationInProgress = useRef(false)
   const completionInProgress = useRef(false)
   const journalInProgress = useRef(false)
+  const deletionInProgress = useRef(false)
   const hasChangedScreen = useRef(false)
 
   useEffect(() => {
@@ -116,6 +121,9 @@ function App() {
     notePhotoBase64Cache.current = null
     setNotePhoto(null)
     setNotePhotoPreview('')
+    setAiFeedback(null)
+    setClarification('')
+    setClarifications([])
   }
 
   async function getChallenge() {
@@ -151,8 +159,12 @@ function App() {
       }
 
       setChallenge({ ...data, completionId: crypto.randomUUID() })
-    } catch {
-      setError("We couldn't find a challenge just now. Please try again in a moment.")
+    } catch (requestError) {
+      setError(requestError instanceof TypeError
+        ? 'We could not reach the challenge service. Check that the backend is running, then try again.'
+        : requestError instanceof Error && requestError.message
+          ? requestError.message
+          : "We couldn't find a challenge just now. Please try again in a moment.")
     } finally {
       requestInProgress.current = false
       setLoading(false)
@@ -197,6 +209,33 @@ function App() {
     await loadJournal()
   }
 
+  async function deleteJournalEntry(entry) {
+    if (deletionInProgress.current) return
+    if (!window.confirm(`Delete “${entry.questTitle || 'this outdoor moment'}” from your journal?`)) return
+
+    deletionInProgress.current = true
+    setDeletingCompletionId(entry.completionId)
+    setDeleteError('')
+    try {
+      const response = await fetch(`http://localhost:3000/api/completions/${encodeURIComponent(entry.completionId)}`, { method: 'DELETE' })
+      let data
+      try {
+        data = await response.json()
+      } catch {
+        throw new Error('The journal returned an unexpected response. Refresh and try again.')
+      }
+      if (!response.ok) throw new Error(typeof data?.error === 'string' ? data.error : 'This journal entry could not be deleted. Please try again.')
+      setJournalEntries((entries) => entries.filter((item) => item.completionId !== entry.completionId))
+    } catch (error) {
+      setDeleteError(error instanceof TypeError
+        ? 'We could not reach your journal. Check that the backend is running, then try again.'
+        : error instanceof Error && error.message ? error.message : 'This journal entry could not be deleted. Please try again.')
+    } finally {
+      deletionInProgress.current = false
+      setDeletingCompletionId('')
+    }
+  }
+
   function closeJournal() {
     setScreen(journalReturnScreen)
   }
@@ -239,6 +278,9 @@ function App() {
     setNotePhotoPreview(previewUrl)
     setNotePhotoError('')
     setCompletionError('')
+    setAiFeedback(null)
+    setClarification('')
+    setClarifications([])
   }
 
   function removeNotePhoto() {
@@ -250,6 +292,7 @@ function App() {
 
   async function sendReflectionRequest(clarificationText = '') {
     const requestBody = { reflection: reflection.trim() }
+    if (challenge) requestBody.challenge = { title: challenge.title, activity: challenge.activity }
     if (notePhoto) {
       if (notePhotoBase64Cache.current?.file !== notePhoto) {
         notePhotoBase64Cache.current = { file: notePhoto, base64: await fileToBase64(notePhoto) }
@@ -275,7 +318,7 @@ function App() {
       throw new Error(typeof data?.error === 'string' ? data.error : 'We could not get feedback just now. Your notes are still here; please try again.')
     }
 
-    const validStatuses = ['readable', 'partially_readable', 'unclear', 'no_image']
+    const validStatuses = ['readable', 'partially_readable', 'unclear', 'no_image', 'not_applicable']
     if (
       typeof data?.feedback !== 'string' ||
       !data.feedback.trim() ||
@@ -293,7 +336,7 @@ function App() {
   async function saveQuestCompletion(feedback = aiFeedback, clarificationHistory = clarifications) {
     if (completionInProgress.current) return false
     if (!notePhoto) {
-      setCompletionError('Add a photo of your handwritten notes before completing this quest.')
+      setCompletionError('Add a photo of your notes or drawing before completing this quest.')
       return false
     }
     if (!challenge?.completionId) {
@@ -357,10 +400,6 @@ function App() {
 
   async function requestReflectionFeedback() {
     if (feedbackInProgress.current) return
-    if (aiFeedback) {
-      await saveQuestCompletion(aiFeedback, clarifications)
-      return
-    }
     if (!notePhoto && !reflection.trim()) {
       setFeedbackError('Add a photo of your notes or type a short summary to get a response.')
       return
@@ -373,7 +412,8 @@ function App() {
     try {
       const data = await sendReflectionRequest()
       setAiFeedback(data)
-      await saveQuestCompletion(data, clarifications)
+      setClarifications([])
+      setClarification('')
     } catch (error) {
       setFeedbackError(error instanceof TypeError
         ? 'We could not reach the feedback service. Your photo and summary are still here; please try again.'
@@ -406,8 +446,9 @@ function App() {
       const nextClarifications = [...clarifications, currentClarification]
       setAiFeedback(data)
       setClarifications(nextClarifications)
-      const saved = await saveQuestCompletion(data, nextClarifications)
-      if (saved) setClarification('')
+      if (screen === 'complete') await saveQuestCompletion(data, nextClarifications)
+      setClarification('')
+      setClarificationError('')
     } catch (error) {
       setClarificationError(error instanceof TypeError
         ? 'We could not reach the feedback service. Your photo and notes are still here; please try again.'
@@ -421,15 +462,25 @@ function App() {
     }
   }
 
+  async function confirmInterpretation() {
+    if (!aiFeedback || feedbackInProgress.current) return
+    await saveQuestCompletion(aiFeedback, clarifications)
+  }
+
+  const handwritingStatus = aiFeedback?.handwriting?.status
+  const hasHandwritingResult = ['readable', 'partially_readable', 'unclear'].includes(handwritingStatus)
+  const handwritingNeedsClarification = ['partially_readable', 'unclear'].includes(handwritingStatus)
+  const isDrawing = handwritingStatus === 'not_applicable'
+
   return (
     <main className="page-shell" id="home">
       <header className="topbar">
-        <a className="brand" href="#home" aria-label="Touch Grass home">
+        <a className="brand" href="#home" aria-label="out'n'about home">
           <LeafMark />
-          <span>Touch Grass<span className="brand-dot">.</span></span>
+          <span>out'n'about<span className="brand-dot">.</span></span>
         </a>
-        <p className="topbar-note"><span aria-hidden="true">✳</span> A small invitation outside</p>
         <button className="journal-nav-button" type="button" onClick={screen === 'journal' ? closeJournal : openJournal}>
+          <FontAwesomeIcon className="nav-icon" icon={screen === 'journal' ? faArrowLeft : faBookOpen} aria-hidden="true" />
           {screen === 'journal' ? 'Back to your moment' : 'My journal'}
         </button>
       </header>
@@ -437,6 +488,9 @@ function App() {
       {screen === 'home' && (
         <>
       <section className="hero" aria-labelledby="hero-title">
+        <div className="hero-art" aria-hidden="true">
+          <MeadowIllustration />
+        </div>
         <div className="hero-copy">
           <p className="eyebrow">A MOMENT FOR YOURSELF</p>
           <h1 id="hero-title" tabIndex={-1}>A little less scrolling.<br /><em>A little more living.</em></h1>
@@ -445,36 +499,49 @@ function App() {
           </p>
           <button className="challenge-button" type="button" onClick={getChallenge} disabled={loading}>
             <span>{loading ? 'Finding a little moment...' : error ? 'Try again' : 'Get a challenge'}</span>
-            <span className="button-arrow" aria-hidden="true">{loading ? <span className="loading-spinner" /> : '↗'}</span>
+            <span className="button-arrow" aria-hidden="true">{loading ? <span className="loading-spinner" /> : <FontAwesomeIcon icon={faArrowRight} />}</span>
           </button>
-          <p className="gentle-note"><span aria-hidden="true">✳</span> No rush. No streaks. Just a little fresh air.</p>
+          <p className="gentle-note"><span aria-hidden="true"><FontAwesomeIcon icon={faAsterisk} /></span> No rush. No streaks. Just a little fresh air.</p>
         </div>
-        <MeadowIllustration />
+        <div className="challenge-card" aria-live="polite" aria-atomic="true" aria-busy={loading}>
+          <div className="challenge-copy">
+            <p className="card-label">
+              {loading ? 'A MOMENT PLEASE' : error ? 'A SMALL PAUSE' : challenge ? `YOUR LITTLE OUTDOOR CHALLENGE · ${challenge.durationMinutes} MINUTES` : 'A GENTLE REMINDER'}
+            </p>
+            <h2 className={error && !loading ? 'challenge-error' : undefined} role={error && !loading ? 'alert' : undefined}>
+              {loading ? (
+                  <span className="loading-message" role="status" aria-label="Finding a little idea for you">
+                    <span aria-hidden="true">
+                      Finding a little idea for you<span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
+                    </span>
+                  </span>
+                ) : error ? (
+                  error
+                ) : challenge ? (
+                  challenge.activity
+                ) : (
+                  'When you are ready, we will find a small moment outside for you.'
+                )}
+            </h2>
+            {challenge && !loading && <p className="paper-note">Before you begin, bring paper and a pen. You’ll use them outside to jot down anything you notice or want to remember.</p>}
+            {challenge && !loading && !error && (
+              <button className="start-session-button" type="button" onClick={() => setScreen('prepare')}>
+                Start challenge <FontAwesomeIcon className="inline-action-icon" icon={faArrowRight} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </div>
+      <footer className="footer">
+        <span>Copyright © 2026. All rights reserved.</span>
+      </footer>
+        {/* <svg className="grass-divider" viewBox="0 0 1440 90" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0 21C170 14 215 64 360 64C520 64 560 18 720 18C880 18 920 64 1080 64C1225 64 1270 18 1440 22V90H0Z" fill="#dfe3ce" />
+          <path d="M0 48C170 40 210 76 360 76C520 76 560 37 720 38C880 37 920 76 1080 76C1230 76 1270 42 1440 48V90H0Z" fill="#b8c49c" />
+          <path d="M132 47c5-12 8-16 13-22m-7 22c-1-11-3-16-7-21m348 18c4-10 8-14 13-19m-7 19c0-10-2-14-6-18m326 21c4-12 7-16 12-21m-6 21c0-11-2-16-6-20m387 0c4-11 8-15 13-20m-7 20c0-10-2-14-6-18m191 7c4-10 8-14 13-18m-7 18c0-9-2-13-6-17" fill="none" stroke="#708767" strokeLinecap="round" strokeWidth="2" />
+        </svg> */}
       </section>
 
-      <section className="challenge-card" aria-live="polite" aria-atomic="true" aria-busy={loading}>
-        <div className={`challenge-icon${loading ? ' is-loading' : ''}`} aria-hidden="true">
-          {loading ? <span className="loading-spinner" /> : challenge ? '↗' : '✳'}
-        </div>
-        <div className="challenge-copy">
-          <p className="card-label">
-            {loading ? 'A MOMENT PLEASE' : error ? 'A SMALL PAUSE' : challenge ? `YOUR LITTLE OUTDOOR CHALLENGE · ${challenge.durationMinutes} MINUTES` : 'A GENTLE REMINDER'}
-          </p>
-          <h2>
-            {loading ? 'Finding a little moment outdoors...' : error ? 'Your next little adventure is still out there.' : challenge ? challenge.title : 'The best part starts when you put your phone down.'}
-          </h2>
-          <p className={error && !loading ? 'challenge-error' : undefined} role={error && !loading ? 'alert' : undefined}>
-            {loading ? 'Asking your local guide for one gentle idea.' : error ? error : challenge ? challenge.activity : 'When you are ready, we will find a small moment outside for you.'}
-          </p>
-          {challenge && !loading && <p className="paper-note">Before you begin, bring paper and a pen. You’ll use them outside to jot down anything you notice or want to remember.</p>}
-          {challenge && !loading && !error && (
-            <button className="start-session-button" type="button" onClick={() => setScreen('prepare')}>
-              Start challenge <span aria-hidden="true">&rarr;</span>
-            </button>
-          )}
-        </div>
-        <LeafMark />
-      </section>
+
         </>
       )}
 
@@ -483,12 +550,17 @@ function App() {
           <p className="eyebrow">YOUR OUTDOOR MOMENTS</p>
           <h1 className="journey-title" id="journey-title" tabIndex={-1}>Your journal.</h1>
           <p className="journey-intro">A quiet place to revisit the moments you saved after stepping outside.</p>
+          <div className="journal-overview" aria-label="Journal summary">
+            <div className="journal-summary-item"><span className="journal-summary-icon" aria-hidden="true"><LeafMark/></span><span><strong>{journalEntries.reduce((total, entry) => total + (Number.isFinite(entry.xpAwarded) ? entry.xpAwarded : 5), 0)}</strong><small>Total XP earned</small></span></div>
+            <div className="journal-summary-item"><span className="journal-summary-icon journal-summary-flower" aria-hidden="true"><FontAwesomeIcon icon={faCircleCheck} /></span><span><strong>{journalEntries.length}</strong><small>Quests completed</small></span></div>
+          </div>
           <div className="journal-toolbar">
             <p>{journalLoading ? 'Gathering your saved moments...' : `${journalEntries.length} ${journalEntries.length === 1 ? 'moment' : 'moments'} saved`}</p>
             <button className="journal-refresh-button" type="button" onClick={loadJournal} disabled={journalLoading}>
               {journalLoading ? 'Loading...' : 'Refresh journal'}
             </button>
           </div>
+          {deleteError && <p className="journal-delete-error" role="alert">{deleteError}</p>}
           {journalLoading && <p className="journal-status" role="status">Loading your journal...</p>}
           {journalError && (
             <div className="journal-message" role="alert">
@@ -499,7 +571,7 @@ function App() {
           {!journalLoading && !journalError && journalEntries.length === 0 && (
             <div className="journal-message journal-empty">
               <h2>No saved moments yet.</h2>
-              <p>When you finish a quest with a photo of your handwritten notes, it will find a place here.</p>
+              <p>When you finish a quest with a photo of your notes or drawing, it will find a place here.</p>
             </div>
           )}
           {!journalError && journalEntries.length > 0 && (
@@ -519,7 +591,10 @@ function App() {
                       </div>
                       <div className="journal-entry-meta">
                         <time dateTime={Number.isNaN(dateTime.getTime()) ? undefined : dateTime.toISOString()}>{formatCompletionDate(entry.completedAt)}</time>
-                        <span>{entry.xpAwarded === 5 ? '5 XP' : '0 XP'}</span>
+                        <span className="journal-entry-xp"><FontAwesomeIcon icon={faStar} aria-hidden="true" /> {Number.isFinite(entry.xpAwarded) ? entry.xpAwarded : 5} XP earned</span>
+                        <button className="journal-delete-button" type="button" onClick={() => deleteJournalEntry(entry)} disabled={Boolean(deletingCompletionId)} aria-label={`Delete ${entry.questTitle || 'journal entry'}`} title="Delete journal entry">
+                          <FontAwesomeIcon icon={faTrashCan} aria-hidden="true" />
+                        </button>
                       </div>
                     </header>
                     <p className="journal-prompt">{entry.questPrompt}</p>
@@ -555,7 +630,7 @@ function App() {
                     )}
                     {Array.isArray(entry.clarificationHistory) && entry.clarificationHistory.length > 0 && (
                       <section className="journal-detail">
-                        <h3>Your handwriting clarifications</h3>
+                        <h3>Your clarifications</h3>
                         {entry.clarificationHistory.map((item, clarificationIndex) => (
                           <p className="journal-preserve-lines" key={`${entry.completionId}-${clarificationIndex}`}>{item}</p>
                         ))}
@@ -580,7 +655,7 @@ function App() {
           </article>
           <p className="journey-intro preparation-note">Bring paper and a pen with you. While you’re outside, use them to record anything you notice or want to remember.</p>
           <button className="challenge-button journey-button" type="button" onClick={() => setScreen('active')}>
-            <span>I’ve got my paper and pen</span><span className="button-arrow" aria-hidden="true">&rarr;</span>
+            <span>I’ve got my paper and pen</span><span className="button-arrow" aria-hidden="true"><FontAwesomeIcon icon={faArrowRight} /></span>
           </button>
         </section>
       )}
@@ -595,14 +670,14 @@ function App() {
             <p>{challenge.activity}</p>
           </article>
           <div className="session-guidance">
-            <span className="guidance-mark" aria-hidden="true">*</span>
+            <span className="guidance-mark" aria-hidden="true"><FontAwesomeIcon icon={faPen} /></span>
             <div>
               <h2>Now, let your phone rest.</h2>
               <p>Put your phone away, take a slow breath, and enjoy the moment. Use your paper and pen to write down anything you notice or want to remember. There is no timer, GPS, or check-in; come back whenever you feel ready.</p>
             </div>
           </div>
           <button className="challenge-button journey-button" type="button" onClick={() => setScreen('reflection')}>
-            <span>I'm back</span><span className="button-arrow" aria-hidden="true">&rarr;</span>
+            <span>I'm back</span><span className="button-arrow" aria-hidden="true"><FontAwesomeIcon icon={faArrowRight} /></span>
           </button>
         </section>
       )}
@@ -611,9 +686,9 @@ function App() {
         <section className="journey-screen reflection-screen" id="journey" aria-labelledby="journey-title">
           <p className="eyebrow">A MOMENT TO NOTICE</p>
           <h1 className="journey-title" id="journey-title" tabIndex={-1}>Look back at your notes.</h1>
-          <p className="journey-intro">Take a moment to review what you wrote by hand. If you like, share a short summary of those notes and your experience here.</p>
+          <p className="journey-intro">Take a moment to review what you wrote or drew. If you like, share a short summary of what you noticed and your experience here.</p>
           <section className="note-photo-section" aria-labelledby="note-photo-title">
-            <h2 id="note-photo-title">Add a photo of your paper notes (optional)</h2>
+            <h2 id="note-photo-title">Add a photo of your notes or drawing (optional)</h2>
             <p>Choose a JPEG, PNG, or WebP image up to 8 MB. A photo is required to save your completed quest. If you request feedback, the photo is also sent to your configured Ollama server (local by default).</p>
             <div className="note-photo-actions">
               <button className="photo-action-button" type="button" onClick={() => cameraInput.current?.click()} disabled={feedbackLoading}>
@@ -628,7 +703,7 @@ function App() {
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 capture="environment"
-                aria-label="Take a photo of your handwritten notes"
+                aria-label="Take a photo of your notes or drawing"
                 tabIndex={-1}
                 disabled={feedbackLoading}
                 onChange={handleNotePhotoSelection}
@@ -638,7 +713,7 @@ function App() {
                 className="visually-hidden"
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
-                aria-label="Choose a photo of your handwritten notes"
+                aria-label="Choose a photo of your notes or drawing"
                 tabIndex={-1}
                 disabled={feedbackLoading}
                 onChange={handleNotePhotoSelection}
@@ -647,7 +722,7 @@ function App() {
             {notePhotoError && <p className="note-photo-error" role="alert">{notePhotoError}</p>}
             {notePhotoPreview && (
               <figure className="note-photo-preview">
-                <img src={notePhotoPreview} alt="Preview of your handwritten paper notes" />
+                <img src={notePhotoPreview} alt="Preview of your notes or drawing" />
                 <figcaption>
                   <span>Photo ready on this device</span>
                   <button className="remove-photo-button" type="button" onClick={removeNotePhoto} disabled={feedbackLoading}>Remove photo</button>
@@ -655,29 +730,82 @@ function App() {
               </figure>
             )}
           </section>
-          <label className="reflection-label" htmlFor="reflection-note">A summary of my handwritten notes</label>
+          <label className="reflection-label" htmlFor="reflection-note">A few words about what I noticed</label>
           <textarea
             id="reflection-note"
             className="reflection-textarea"
             value={reflection}
-            onChange={(event) => setReflection(event.target.value)}
-            placeholder="A few words from your paper notes, or something you’d like to remember..."
+            onChange={(event) => {
+              setReflection(event.target.value)
+              if (aiFeedback) {
+                setAiFeedback(null)
+                setClarifications([])
+                setClarification('')
+              }
+            }}
+            placeholder="A detail from your notes or drawing, or something you’d like to remember..."
             maxLength={MAX_TYPED_REFLECTION_LENGTH}
             disabled={feedbackLoading}
             rows={6}
           />
+          {aiFeedback && (
+            <section className="ai-feedback-card interpretation-review" aria-labelledby="interpretation-review-title" aria-busy={feedbackLoading}>
+              <p className="card-label">PLEASE REVIEW BEFORE SAVING</p>
+              <h2 id="interpretation-review-title">Does this reflect your drawing and writing?</h2>
+              <p className="ai-feedback-message">{aiFeedback.feedback}</p>
+              <div className="handwriting-reading">
+                <h3>Current interpretation</h3>
+                <blockquote>{aiFeedback.interpretation}</blockquote>
+                {aiFeedback.handwriting.transcription && (
+                  <>
+                    <h3>Handwriting the model could read</h3>
+                    <blockquote>{aiFeedback.handwriting.transcription}</blockquote>
+                  </>
+                )}
+                {aiFeedback.handwriting.status === 'partially_readable' && <p className="interpretation-note">Some handwriting may be missing. You can correct the written words or the visual interpretation below.</p>}
+                {aiFeedback.handwriting.status === 'unclear' && <p className="interpretation-note">The handwriting was difficult to read. You can correct the written words or the visual interpretation below.</p>}
+              </div>
+              <label className="reflection-label" htmlFor="review-clarification">Correct the interpretation (optional)</label>
+              <textarea
+                id="review-clarification"
+                className="reflection-textarea clarification-textarea"
+                value={clarification}
+                onChange={(event) => {
+                  setClarification(event.target.value)
+                  if (clarificationError) setClarificationError('')
+                }}
+                placeholder="For example: the drawing shows a leaf, and the note says it was growing beside the path."
+                maxLength={MAX_CLARIFICATION_LENGTH}
+                disabled={feedbackLoading || clarifications.length >= MAX_CLARIFICATION_ATTEMPTS}
+                rows={3}
+              />
+              {clarificationError && <p className="feedback-error" role="alert">{clarificationError}</p>}
+              {clarifications.length < MAX_CLARIFICATION_ATTEMPTS && (
+                <button className="finish-without-feedback" type="button" onClick={submitClarification} disabled={feedbackLoading || !clarification.trim()}>
+                  {feedbackLoading ? 'Updating interpretation...' : 'Update interpretation'}
+                </button>
+              )}
+              <button className="challenge-button journey-button" type="button" onClick={confirmInterpretation} disabled={feedbackLoading || completionLoading}>
+                <span>{completionLoading ? 'Saving your quest...' : 'This looks right — save'}</span>
+                <span className="button-arrow" aria-hidden="true">{completionLoading ? <span className="loading-spinner" /> : <FontAwesomeIcon icon={faArrowRight} />}</span>
+              </button>
+              {clarifications.length > 0 && <p className="clarification-attempts">You can make {MAX_CLARIFICATION_ATTEMPTS - clarifications.length} more interpretation {MAX_CLARIFICATION_ATTEMPTS - clarifications.length === 1 ? 'update' : 'updates'} before saving.</p>}
+            </section>
+          )}
           {feedbackError && <p className="feedback-error" role="alert">{feedbackError}</p>}
           {completionError && <p className="feedback-error" role="alert">{completionError}</p>}
           <div className="feedback-actions">
-            <button className="challenge-button journey-button" type="button" onClick={requestReflectionFeedback} disabled={feedbackLoading || completionLoading}>
-              <span>{feedbackLoading ? 'Reading your notes...' : completionLoading ? 'Saving your quest...' : aiFeedback ? 'Retry saving your quest' : 'Get a gentle response'}</span>
-              <span className="button-arrow" aria-hidden="true">{feedbackLoading || completionLoading ? <span className="loading-spinner" /> : '\u2192'}</span>
-            </button>
-            <button className="finish-without-feedback" type="button" onClick={() => saveQuestCompletion()} disabled={feedbackLoading || completionLoading}>
+            {!aiFeedback && (
+              <button className="challenge-button journey-button" type="button" onClick={requestReflectionFeedback} disabled={feedbackLoading || completionLoading}>
+                <span>{feedbackLoading ? 'Reading your notes...' : 'Get a gentle response'}</span>
+                <span className="button-arrow" aria-hidden="true">{feedbackLoading || completionLoading ? <span className="loading-spinner" /> : <FontAwesomeIcon icon={faArrowRight} />}</span>
+              </button>
+            )}
+            {!aiFeedback && <button className="finish-without-feedback" type="button" onClick={() => saveQuestCompletion()} disabled={feedbackLoading || completionLoading}>
               {completionLoading ? 'Saving your quest...' : 'Finish without AI feedback'}
-            </button>
+            </button>}
           </div>
-          {(feedbackLoading || completionLoading) && <p className="feedback-loading-note" role="status">{feedbackLoading ? 'Your photo and summary are being sent to your configured Ollama model for a brief response.' : 'Saving your completed quest and handwritten photo.'}</p>}
+          {(feedbackLoading || completionLoading) && <p className="feedback-loading-note" role="status">{feedbackLoading ? 'Your image and summary are being sent to your configured Ollama model for a brief response.' : 'Saving your completed quest and image.'}</p>}
         </section>
       )}
 
@@ -710,8 +838,8 @@ function App() {
           )}
           {notePhotoPreview && (
             <figure className="completion-photo">
-              <img src={notePhotoPreview} alt="Your selected photo of handwritten paper notes" />
-              <figcaption>Your handwritten notes photo</figcaption>
+              <img src={notePhotoPreview} alt="Your selected photo of your notes or drawing" />
+              <figcaption>Your notes or drawing photo</figcaption>
             </figure>
           )}
           {aiFeedback && (
@@ -722,9 +850,21 @@ function App() {
               <div className="handwriting-reading">
                 <h3>{clarifications.length ? 'Updated interpretation' : 'Current interpretation'}</h3>
                 <blockquote>{aiFeedback.interpretation || 'The model could not form a reliable interpretation yet.'}</blockquote>
+                <p className="interpretation-note">
+                  {aiFeedback.handwriting.status === 'readable'
+                    ? 'This interpretation draws on the words the model could read in your photo; compare it with your notes if a detail feels uncertain.'
+                    : aiFeedback.handwriting.status === 'partially_readable'
+                      ? 'Some handwriting was unclear, so the interpretation may miss a detail. You can clarify any words below.'
+                      : aiFeedback.handwriting.status === 'not_applicable'
+                        ? 'This interpretation is based on the visible image and your original challenge context.'
+                      : aiFeedback.handwriting.status === 'no_image'
+                        ? 'This interpretation is based on your typed summary and challenge context, since no image was provided.'
+                        : 'The handwriting was difficult to read, so treat this interpretation as tentative. You can clarify any words below.'}
+                </p>
               </div>
+              {hasHandwritingResult && (
               <div className="handwriting-reading">
-                <h3>What the model could read in the photo</h3>
+                <h3>Handwriting in the photo</h3>
                 {aiFeedback.handwriting.status === 'readable' && aiFeedback.handwriting.transcription
                   ? <blockquote>{aiFeedback.handwriting.transcription}</blockquote>
                   : aiFeedback.handwriting.status === 'partially_readable'
@@ -732,9 +872,10 @@ function App() {
                     : aiFeedback.handwriting.status === 'unclear'
                       ? <p>The model could not confidently read the handwriting.</p>
                       : aiFeedback.handwriting.status === 'no_image'
-                        ? <p>No handwritten photo was provided. This response is based only on your typed summary.</p>
+                        ? <p>No image was provided. This response is based only on your typed summary.</p>
                         : <p>The model could not confidently read the handwriting.</p>}
               </div>
+              )}
               {clarifications.length > 0 && (
                 <div className="clarification-history">
                   <p className="card-label">YOUR CLARIFICATION{clarifications.length > 1 ? 'S' : ''}</p>
@@ -743,13 +884,15 @@ function App() {
               )}
             </section>
           )}
-          {notePhoto && aiFeedback && (['partially_readable', 'unclear'].includes(aiFeedback.handwriting.status) || feedbackNeedsClarification(aiFeedback.feedback)) && (
+          {notePhoto && aiFeedback && (handwritingNeedsClarification || isDrawing || feedbackNeedsClarification(aiFeedback.feedback)) && (
             <section className="clarification-panel" aria-labelledby="clarification-title" aria-busy={feedbackLoading}>
-              <h2 id="clarification-title">Help with the handwriting</h2>
-              <p>If a word was unclear, type it here or correct the reading. Your correction will guide another response; the original photo and summary stay with it.</p>
+              <h2 id="clarification-title">{handwritingNeedsClarification ? 'Help with the handwriting' : 'Help with the interpretation'}</h2>
+              <p>{handwritingNeedsClarification
+                ? 'If a word was unclear, type it here or correct the reading. Your correction will guide another response; the original photo and summary stay with it.'
+                : 'Add context or correct a detail in the image interpretation. Your clarification will guide another response; the original photo and notes stay with it.'}</p>
               {clarifications.length < MAX_CLARIFICATION_ATTEMPTS ? (
                 <>
-                  <label className="reflection-label" htmlFor="handwriting-clarification">Type unclear words or correct the interpretation</label>
+                  <label className="reflection-label" htmlFor="handwriting-clarification">{handwritingNeedsClarification ? 'Type unclear words or correct the interpretation' : 'Clarify the image interpretation'}</label>
                   <textarea
                     id="handwriting-clarification"
                     className="reflection-textarea clarification-textarea"
@@ -758,7 +901,7 @@ function App() {
                       setClarification(event.target.value)
                       if (clarificationError) setClarificationError('')
                     }}
-                    placeholder="For example: the word is ‘sparrows’, not ‘shadows’..."
+                    placeholder={handwritingNeedsClarification ? 'For example: the word is ‘sparrows’, not ‘shadows’...' : 'For example: this drawing shows a leaf, not a bird...'}
                     maxLength={MAX_CLARIFICATION_LENGTH}
                     disabled={feedbackLoading}
                     rows={3}
@@ -766,7 +909,7 @@ function App() {
                   {clarificationError && <p className="feedback-error" role="alert">{clarificationError}</p>}
                   <button className="challenge-button journey-button clarification-submit" type="button" onClick={submitClarification} disabled={feedbackLoading}>
                     <span>{feedbackLoading ? 'Sending clarification...' : 'Submit clarification'}</span>
-                    <span className="button-arrow" aria-hidden="true">{feedbackLoading ? <span className="loading-spinner" /> : '\u2192'}</span>
+                    <span className="button-arrow" aria-hidden="true">{feedbackLoading ? <span className="loading-spinner" /> : <FontAwesomeIcon icon={faArrowRight} />}</span>
                   </button>
                   <p className="clarification-attempts">{MAX_CLARIFICATION_ATTEMPTS - clarifications.length} clarification {MAX_CLARIFICATION_ATTEMPTS - clarifications.length === 1 ? 'attempt' : 'attempts'} available. You can finish whenever you like.</p>
                 </>
@@ -776,15 +919,10 @@ function App() {
             </section>
           )}
           <button className="challenge-button journey-button" type="button" onClick={startNewChallenge} disabled={feedbackLoading}>
-            <span>Start a new challenge</span><span className="button-arrow" aria-hidden="true">&rarr;</span>
+            <span>Start a new challenge</span><span className="button-arrow" aria-hidden="true"><FontAwesomeIcon icon={faArrowRight} /></span>
           </button>
         </section>
       )}
-
-      <footer className="footer">
-        <span>Made for the moments between everything else.</span>
-        <span className="footer-flower" aria-hidden="true">❧</span>
-      </footer>
     </main>
   )
 }

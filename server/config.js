@@ -10,10 +10,10 @@ export const port = Number.parseInt(process.env.PORT ?? '3000', 10)
 export const mongoUri = process.env.MONGODB_URI
 export const ollamaUrl = (process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434').replace(/\/+$/, '')
 export const ollamaModel = process.env.OLLAMA_MODEL ?? 'gemma3:4b'
-const configuredTimeout = Number.parseInt(process.env.OLLAMA_TIMEOUT_MS ?? '60000', 10)
+const configuredTimeout = Number.parseInt(process.env.OLLAMA_TIMEOUT_MS ?? '120000', 10)
 export const ollamaTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
   ? configuredTimeout
-  : 60_000
+  : 120_000
 const configuredReflectionTimeout = Number.parseInt(process.env.OLLAMA_REFLECTION_TIMEOUT_MS ?? '180000', 10)
 export const ollamaReflectionTimeoutMs = Number.isFinite(configuredReflectionTimeout) && configuredReflectionTimeout > 0
   ? configuredReflectionTimeout
@@ -64,11 +64,11 @@ export const reflectionSchema = {
       properties: {
         status: {
           type: 'string',
-          enum: ['readable', 'partially_readable', 'unclear', 'no_image'],
+          enum: ['readable', 'partially_readable', 'unclear', 'no_image', 'not_applicable'],
         },
         transcription: {
           type: 'string',
-          description: 'Only text confidently visible in the image. Empty if no image or handwriting is unclear.',
+          description: 'Only text confidently visible in the image. Empty if there is no image, no handwriting, or handwriting is unclear.',
         },
       },
       required: ['status', 'transcription'],
