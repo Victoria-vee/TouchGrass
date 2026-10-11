@@ -1,0 +1,24 @@
+:root {
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-body: 'Nunito', 'Segoe UI', sans-serif;
+  font-family: var(--font-body);
+  color: #294438;
+  /* background: #f6f5ed; */
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+}
+
+* { box-sizing: border-box; }
+
+h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); }
+
+html { min-width: 320px; min-height: 100%; }
+
+body { min-width: 320px; min-height: 100vh; margin: 0; }
+
+#root { min-height: 100vh; }
+
+button, a { font: inherit; }
