@@ -36,6 +36,21 @@ The app uses the open-weight Gemma 3 4B model through Ollama. Its local text and
 - A MongoDB Atlas cluster and connection URI
 - Ollama installed and running, with `gemma3:4b` available
 
+## Screenshots of work
+<img width="1920" height="1008" alt="image" src="https://github.com/user-attachments/assets/97e0bfb1-07a3-4d4b-b281-34290b45f09e" />
+
+<img width="1920" height="1008" alt="image" src="https://github.com/user-attachments/assets/aea49177-296f-420b-940a-ebf627359c75" />
+
+<img width="1920" height="1008" alt="image" src="https://github.com/user-attachments/assets/bf0d586a-f2ff-4223-b12e-f5784166f622" />
+
+<img width="960" height="504" alt="image" src="https://github.com/user-attachments/assets/21d0f551-acaa-493d-8cba-f02451f1cc97" />
+
+<img width="1920" height="1008" alt="image" src="https://github.com/user-attachments/assets/bcaef6d1-7188-4e7a-a9fe-292e2b2f4fdd" />
+
+<img width="1920" height="1008" alt="image" src="https://github.com/user-attachments/assets/2fe007da-a706-4b00-bdcf-3a3e7a963c1b" />
+
+
+
 ## Local setup
 
 ### 1. Configure the backend
